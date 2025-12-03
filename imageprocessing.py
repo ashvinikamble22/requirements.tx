@@ -1,74 +1,114 @@
 import streamlit as st
-from PIL import Image, ImageOps
 import numpy as np
-import matplotlib.pyplot as plt
+from PIL import Image
+import cv2
+import io
 
-st.title("📸 Basic Image Processing App – Deep Learning Practical")
-st.write("Upload an image and perform basic image processing operations.")
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(
+    page_title="Image Preprocessing App",
+    layout="wide"
+)
 
-uploaded = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
+st.title("🖼 Image Preprocessing App")
+st.write("Upload an image and apply preprocessing techniques")
 
-if uploaded:
-    img = Image.open(uploaded).convert("RGB")
-    st.image(img, caption="Original Image", use_column_width=True)
+# ---------------- HELPER FUNCTIONS ----------------
+def pil_to_cv2(img):
+    img = np.array(img)
+    return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-    st.subheader("1️⃣ Convert to Black & White")
-    if st.button("Convert"):
-        gray = img.convert("L")
-        st.image(gray, caption="Black & White Image")
+def cv2_to_pil(img):
+    return Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
-    st.subheader("2️⃣ Show Image Properties")
-    if st.button("Show Properties"):
-        st.write("Format: RGB (Converted)")
-        st.write("Size:", img.size)
-        st.write("Mode:", img.mode)
+# ---------------- FILE UPLOAD ----------------
+uploaded_file = st.file_uploader(
+    "Upload Image",
+    type=["jpg", "jpeg", "png"]
+)
 
-    st.subheader("3️⃣ Rotate Image")
-    angle = st.selectbox("Select rotation", [90, 180, 270])
-    if st.button("Rotate"):
-        rotated = img.rotate(angle, expand=True)
-        st.image(rotated, caption=f"Rotated {angle}°")
+if uploaded_file is None:
+    st.warning("Please upload an image.")
+    st.stop()
 
-    st.subheader("4️⃣ Mirror the Image")
-    if st.button("Mirror Image"):
-        mirror = ImageOps.mirror(img)
-        st.image(mirror, caption="Mirror Image")
+# Load image
+image = Image.open(uploaded_file).convert("RGB")
+img = pil_to_cv2(image)
 
-    st.subheader("5️⃣ Object Detection (Edges)")
-    if st.button("Detect Edges"):
-        gray = img.convert("L")
-        arr = np.array(gray)
-        sobel_x = np.array([[-1,0,1], [-2,0,2], [-1,0,1]])
-        edges = np.abs(np.convolve(arr.flatten(), sobel_x.flatten(), mode='same'))
-        edges = edges.reshape(arr.shape)
-        st.image(edges, caption="Detected Edges (Sobel Filter)", clamp=True)
+st.subheader("Original Image")
+st.image(image, use_container_width=True)
 
-    st.subheader("6️⃣ Vertical Cut 70–30")
-    if st.button("Vertical 70–30"):
-        arr = np.array(img)
-        h, w, c = arr.shape
-        left_70 = arr[:, :int(0.7 * w), :]
-        right_30 = arr[:, int(0.7 * w):, :]
-        st.image(left_70, caption="Left 70%")
-        st.image(right_30, caption="Right 30%")
+# ---------------- SIDEBAR CONTROLS ----------------
+st.sidebar.header("⚙ Image Controls")
 
-    st.subheader("7️⃣ Horizontal Cut 70–30")
-    if st.button("Horizontal 70–30"):
-        arr = np.array(img)
-        h, w, c = arr.shape
-        top_70 = arr[:int(0.7 * h), :, :]
-        bottom_30 = arr[int(0.7 * h):, :, :]
-        st.image(top_70, caption="Top 70%")
-        st.image(bottom_30, caption="Bottom 30%")
+width = st.sidebar.slider("Width", 100, 1500, img.shape[1])
+height = st.sidebar.slider("Height", 100, 1500, img.shape[0])
 
-    st.subheader("8️⃣ Create 3×3 Image Grid")
-    if st.button("Create Grid"):
-        arr = np.array(img)
-        fig = plt.figure(figsize=(6, 6))
-        for i in range(9):
-            plt.subplot(3, 3, i+1)
-            plt.imshow(arr)
-            plt.axis("off")
-        st.pyplot(fig)
+angle = st.sidebar.slider("Rotation Angle", -180, 180, 0)
 
-    st.success("✔ All operations executed successfully!")
+flip = st.sidebar.selectbox(
+    "Flip",
+    ["None", "Horizontal", "Vertical"]
+)
+
+brightness = st.sidebar.slider("Brightness", -100, 100, 0)
+contrast = st.sidebar.slider("Contrast", -50, 50, 0)
+
+grayscale = st.sidebar.checkbox("Grayscale")
+blur = st.sidebar.slider("Blur", 0, 25, 0, step=2)
+edges = st.sidebar.checkbox("Edge Detection")
+
+# ---------------- IMAGE PROCESSING ----------------
+processed = cv2.resize(img, (width, height))
+
+# Rotation
+if angle != 0:
+    h, w = processed.shape[:2]
+    center = (w // 2, h // 2)
+    matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    processed = cv2.warpAffine(processed, matrix, (w, h))
+
+# Flip
+if flip == "Horizontal":
+    processed = cv2.flip(processed, 1)
+elif flip == "Vertical":
+    processed = cv2.flip(processed, 0)
+
+# Brightness & Contrast
+processed = cv2.convertScaleAbs(
+    processed,
+    alpha=1 + (contrast / 50),
+    beta=brightness
+)
+
+# Grayscale
+if grayscale:
+    gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+    processed = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+# Blur
+if blur > 0:
+    processed = cv2.GaussianBlur(
+        processed, (blur + 1, blur + 1), 0
+    )
+
+# Edge Detection
+if edges:
+    edge_img = cv2.Canny(processed, 100, 200)
+    processed = cv2.cvtColor(edge_img, cv2.COLOR_GRAY2BGR)
+
+# ---------------- OUTPUT ----------------
+st.subheader("Processed Image")
+output_image = cv2_to_pil(processed)
+st.image(output_image, use_container_width=True)
+
+# ---------------- DOWNLOAD ----------------
+buffer = io.BytesIO()
+output_image.save(buffer, format="PNG")
+
+st.download_button(
+    label="⬇ Download Image",
+    data=buffer.getvalue(),
+    file_name="processed_image.png",
+    mime="image/png"
+)
